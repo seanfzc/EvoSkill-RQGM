@@ -69,10 +69,6 @@ RUN pip install --no-cache-dir \
 RUN useradd -m -s /bin/bash evoskill \
     && mkdir -p /workspace && chown evoskill:evoskill /workspace
 
-# Non-root user
-RUN useradd -m -s /bin/bash evoskill \
-    && mkdir -p /workspace && chown evoskill:evoskill /workspace
-
 # Git config for bundle operations
 RUN git config --global user.email "evoskill@sandbox" \
     && git config --global user.name "EvoSkill Sandbox" \
