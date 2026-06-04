@@ -75,6 +75,27 @@ class TestLifecycleConfig:
         assert cfg.continuous.lifecycle.retrieval_top_k == 10
 
 
+class TestGraduationConfig:
+    def test_defaults(self, tmp_path):
+        cfg = load_config(config_path=_write_project(tmp_path))
+        assert cfg.continuous.graduation_mode == "review"
+        assert cfg.continuous.graduation_threshold == 0.6
+        assert cfg.continuous.shadow_eval_size == 10
+        assert cfg.continuous.max_graduations_per_window == 2
+
+    def test_overrides(self, tmp_path):
+        toml = (
+            "\n[continuous]\n"
+            'graduation_mode = "auto"\n'
+            "graduation_threshold = 0.8\n"
+            "shadow_eval_size = 25\n"
+        )
+        cfg = load_config(config_path=_write_project(tmp_path, toml))
+        assert cfg.continuous.graduation_mode == "auto"
+        assert cfg.continuous.graduation_threshold == 0.8
+        assert cfg.continuous.shadow_eval_size == 25
+
+
 class TestDerivedPaths:
     def test_traces_root_defaults_to_harbor_jobs(self, tmp_path):
         cfg = load_config(config_path=_write_project(tmp_path))

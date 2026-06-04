@@ -17,6 +17,10 @@ from .prompt_generator import prompt_generator_options
 from .skill_proposer import skill_proposer_options
 from .prompt_proposer import prompt_proposer_options
 from .skill_distiller import skill_distiller_options, make_skill_distiller_options
+from .surrogate_verifier import (
+    surrogate_verifier_options,
+    make_surrogate_verifier_options,
+)
 
 __all__ = [
     "proposer_options",
@@ -34,4 +38,6 @@ __all__ = [
     "prompt_proposer_options",
     "skill_distiller_options",
     "make_skill_distiller_options",
+    "surrogate_verifier_options",
+    "make_surrogate_verifier_options",
 ]

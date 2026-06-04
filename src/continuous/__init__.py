@@ -67,6 +67,17 @@ from .lifecycle import (
     restore_skill,
     select_skills,
 )
+from .gate import (
+    EvalOutcome,
+    GateEvaluator,
+    GateTask,
+    GateVerdict,
+    SurrogateEvaluator,
+    build_replay_buffer,
+    build_surrogate_query,
+    run_gate,
+)
+from .graduation import GraduationResult, graduate, install_skill
 
 __all__ = [
     # episode model
@@ -130,4 +141,17 @@ __all__ = [
     "restore_skill",
     "build_merge_query",
     "propose_merge",
+    # gate
+    "GateTask",
+    "GateVerdict",
+    "EvalOutcome",
+    "GateEvaluator",
+    "SurrogateEvaluator",
+    "build_replay_buffer",
+    "build_surrogate_query",
+    "run_gate",
+    # graduation
+    "GraduationResult",
+    "graduate",
+    "install_skill",
 ]

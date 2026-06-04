@@ -114,6 +114,12 @@ class ContinuousConfig:
     distiller_model: str | None = None    # defaults to harness.model
     concurrency: int = 4                  # parallel distiller calls
     success_threshold: float = 1.0        # verifier reward >= this counts as success
+    # Graduation / gate (Phase 3)
+    graduation_mode: Literal['review', 'auto'] = 'review'  # 'review' = human applies; 'auto' = gate applies
+    graduation_threshold: float = 0.6     # min surrogate gate score to pass
+    shadow_eval_size: int = 10            # held-out tasks shown to the verifier
+    max_graduations_per_window: int = 2   # rate limit (used by the watch daemon)
+    surrogate_model: str | None = None    # defaults to harness.model
     lifecycle: LifecycleConfig = field(default_factory=LifecycleConfig)
 
 

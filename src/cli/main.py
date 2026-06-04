@@ -11,6 +11,8 @@ _COMMAND_SPECS = {
     "harvest": ("src.cli.commands.harvest", "harvest_cmd", "Distill candidate skills from real usage traces."),
     "candidates": ("src.cli.commands.candidates", "candidates_cmd", "List/inspect harvested candidate skills."),
     "library": ("src.cli.commands.library", "library_cmd", "Inspect/curate the skill library (stats, duplicates, retrieval)."),
+    "graduate": ("src.cli.commands.graduate", "graduate_cmd", "Gate and graduate a candidate skill into the library."),
+    "reject": ("src.cli.commands.graduate", "reject_cmd", "Mark a candidate skill rejected."),
     "skills": ("src.cli.commands.skills", "skills_cmd", "List all skills learned so far."),
     "diff": ("src.cli.commands.diff", "diff_cmd", "Diff baseline vs best, or between two specific iterations."),
     "logs": ("src.cli.commands.logs", "logs_cmd", "Show recent run history."),

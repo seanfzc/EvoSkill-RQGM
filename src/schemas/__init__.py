@@ -5,6 +5,7 @@ from .prompt_generator import PromptGeneratorResponse
 from .skill_proposer import SkillProposerResponse
 from .prompt_proposer import PromptProposerResponse
 from .skill_distiller import SkillDistillerResponse
+from .surrogate_verifier import SurrogateVerifierResponse
 
 __all__ = [
     "AgentResponse",
@@ -14,4 +15,5 @@ __all__ = [
     "SkillProposerResponse",
     "PromptProposerResponse",
     "SkillDistillerResponse",
+    "SurrogateVerifierResponse",
 ]

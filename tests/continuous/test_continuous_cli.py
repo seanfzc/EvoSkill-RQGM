@@ -12,6 +12,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from src.cli.commands.candidates import candidates_cmd
+from src.cli.commands.graduate import graduate_cmd, reject_cmd
 from src.cli.commands.harvest import harvest_cmd
 from src.cli.commands.library import library_cmd
 from src.continuous.candidates import Candidate, CandidateStore
@@ -150,3 +151,45 @@ class TestLibraryCli:
         result = CliRunner().invoke(library_cmd, ["--config", str(cfg), "--deprecated"])
         assert result.exit_code == 0
         assert "No deprecated skills" in result.output
+
+
+class TestGraduateCli:
+    def _candidate(self):
+        return Candidate(
+            candidate_id="units-abc", skill_name="preserve-units",
+            skill_markdown="---\nname: preserve-units\ndescription: d\n---\nrule",
+            episode_ids=["e1"], cluster_size=1,
+        )
+
+    def test_force_no_branch_installs(self, tmp_path):
+        cfg = _project(tmp_path)
+        from src.cli.config import load_config
+        loaded = load_config(config_path=cfg)
+        CandidateStore(loaded.continuous_candidates_dir).save(self._candidate())
+        # --force skips the gate (no LLM); --no-branch skips git
+        result = CliRunner().invoke(
+            graduate_cmd, ["--config", str(cfg), "--force", "--no-branch", "units-abc"])
+        assert result.exit_code == 0, result.output
+        assert "Graduated" in result.output
+        assert (loaded.skills_dir / "preserve-units" / "SKILL.md").is_file()
+        assert CandidateStore(loaded.continuous_candidates_dir).get("units-abc").status == "graduated"
+
+    def test_graduate_missing_candidate(self, tmp_path):
+        cfg = _project(tmp_path)
+        result = CliRunner().invoke(graduate_cmd, ["--config", str(cfg), "--force", "nope"])
+        assert result.exit_code == 1
+        assert "no candidate" in result.output
+
+    def test_reject(self, tmp_path):
+        cfg = _project(tmp_path)
+        from src.cli.config import load_config
+        store = CandidateStore(load_config(config_path=cfg).continuous_candidates_dir)
+        store.save(self._candidate())
+        result = CliRunner().invoke(reject_cmd, ["--config", str(cfg), "units-abc"])
+        assert result.exit_code == 0
+        assert store.get("units-abc").status == "rejected"
+
+    def test_reject_missing(self, tmp_path):
+        cfg = _project(tmp_path)
+        result = CliRunner().invoke(reject_cmd, ["--config", str(cfg), "nope"])
+        assert result.exit_code == 1
