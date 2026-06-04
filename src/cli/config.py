@@ -84,6 +84,50 @@ class HarborConfig:
 
 
 @dataclass
+class LifecycleConfig:
+    """Skill-library lifecycle management ([continuous.lifecycle])."""
+    similarity_backend: Literal['embedding', 'lexical'] = 'embedding'
+    embedding_provider: str = 'openai'          # OpenAI-compatible; else falls back to lexical
+    embedding_model: str = 'text-embedding-3-small'
+    dedupe_similarity: float = 0.88             # cosine threshold for "redundant"
+    deprecation_baseline: float = 0.0           # contribution floor
+    deprecation_strikes: int = 3                # windows below floor before retiring
+    retrieval_top_k: int = 6                    # skills to surface per task
+
+
+@dataclass
+class ContinuousConfig:
+    """Continuous evolution: learn skills from real usage traces.
+
+    Phase 1 (harvest) uses the harvest-relevant fields below; Phase 2 adds the
+    nested `lifecycle` section. Later phases add graduation/signal settings here.
+    """
+    enabled: bool = False
+    trace_sources: list[str] = field(default_factory=lambda: ['harbor'])  # harbor | goose | jsonl
+    traces_root: str = ''                 # override; default <project>/.evoskill/harbor_jobs
+    jsonl_path: str = ''                  # path for the 'jsonl' source
+    harvest_window: int = 200             # max episodes per harvest
+    min_cluster_size: int = 3             # episodes needed to justify a candidate
+    similarity_threshold: float = 0.3     # cosine threshold for clustering
+    max_candidates: int | None = None     # cap clusters distilled per harvest
+    focus: Literal['failure', 'success', 'both'] = 'failure'
+    distiller_model: str | None = None    # defaults to harness.model
+    concurrency: int = 4                  # parallel distiller calls
+    success_threshold: float = 1.0        # verifier reward >= this counts as success
+    # Graduation / gate (Phase 3)
+    graduation_mode: Literal['review', 'auto'] = 'review'  # 'review' = human applies; 'auto' = gate applies
+    graduation_threshold: float = 0.6     # min surrogate gate score to pass
+    shadow_eval_size: int = 10            # held-out tasks shown to the verifier
+    max_graduations_per_window: int = 2   # rate limit (used by the watch daemon)
+    surrogate_model: str | None = None    # defaults to harness.model
+    # Watch daemon (Phase 4)
+    poll_interval_sec: int = 600          # seconds between watch ticks
+    cost_ceiling_usd_per_tick: float = 0.0  # 0 = unlimited; else stop a tick past this spend
+    auto_deprecate: bool = False          # in auto mode, archive skills past the strike limit
+    lifecycle: LifecycleConfig = field(default_factory=LifecycleConfig)
+
+
+@dataclass
 class ScorerConfig:
     type: Literal['exact', 'multi_tolerance', 'llm', 'script', 'harbor'] = 'multi_tolerance'
     rubric: str | None = None
@@ -128,6 +172,7 @@ class ProjectConfig:
     scorer: ScorerConfig = field(default_factory=ScorerConfig)
     remote: RemoteConfig | None = None
     harbor: HarborConfig = field(default_factory=HarborConfig)
+    continuous: ContinuousConfig = field(default_factory=ContinuousConfig)
     execution: str = 'local'  # 'local', 'docker', or 'daytona'
     project_root: Path = field(default_factory=Path.cwd)
     task_description: str = ''
@@ -154,6 +199,44 @@ class ProjectConfig:
             return Path(override)
         path = Path(self.dataset.harbor_tasks_root)
         return path if path.is_absolute() else self.project_root / path
+
+    @property
+    def harbor_jobs_dir(self) -> Path:
+        """Where Harbor trial output (incl. trajectory.json) is written."""
+        if self.harbor.jobs_dir:
+            path = Path(self.harbor.jobs_dir)
+            return path if path.is_absolute() else self.project_root / path
+        return self.evoskill_dir / 'harbor_jobs'
+
+    @property
+    def continuous_traces_root(self) -> Path:
+        """Default trace root for continuous harvest (Harbor job output)."""
+        if self.continuous.traces_root:
+            path = Path(self.continuous.traces_root)
+            return path if path.is_absolute() else self.project_root / path
+        return self.harbor_jobs_dir
+
+    @property
+    def continuous_candidates_dir(self) -> Path:
+        """Where harvested candidate skills are buffered for review."""
+        return self.evoskill_dir / 'continuous' / 'candidates'
+
+    @property
+    def skills_dir(self) -> Path:
+        """The live skill library."""
+        return self.project_root / '.claude' / 'skills'
+
+    @property
+    def continuous_skill_stats_path(self) -> Path:
+        return self.evoskill_dir / 'continuous' / 'skill_stats.json'
+
+    @property
+    def continuous_embeddings_cache_path(self) -> Path:
+        return self.evoskill_dir / 'continuous' / 'embeddings_cache.json'
+
+    @property
+    def continuous_deprecated_dir(self) -> Path:
+        return self.evoskill_dir / 'continuous' / 'deprecated'
 
 
 def _find_project_root(start: Path | None = None) -> Path | None:
@@ -271,6 +354,14 @@ def load_config(
     harbor_raw = dict(raw.get('harbor', {}))
     harbor = HarborConfig(**harbor_raw) if harbor_raw else HarborConfig()
 
+    # Parse [continuous] section (optional), including the nested
+    # [continuous.lifecycle] table.
+    continuous_raw = dict(raw.get('continuous', {}))
+    lifecycle_raw = continuous_raw.pop('lifecycle', None)
+    continuous = ContinuousConfig(**continuous_raw) if continuous_raw else ContinuousConfig()
+    if lifecycle_raw:
+        continuous.lifecycle = LifecycleConfig(**lifecycle_raw)
+
     return ProjectConfig(
         harness=harness,
         evolution=evolution,
@@ -278,6 +369,7 @@ def load_config(
         scorer=scorer,
         remote=remote,
         harbor=harbor,
+        continuous=continuous,
         execution=execution,
         project_root=root,
         task_description=description,

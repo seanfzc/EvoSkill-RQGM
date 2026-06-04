@@ -1,0 +1,213 @@
+"""CLI tests for `evoskill harvest` (dry-run) and `evoskill candidates`.
+
+Full harvest (LLM distillation) is covered by test_harvest.py against a fake
+distiller; here we exercise the click wiring, argument resolution, and the
+no-LLM paths.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from click.testing import CliRunner
+
+from src.cli.commands.candidates import candidates_cmd
+from src.cli.commands.graduate import graduate_cmd, reject_cmd
+from src.cli.commands.harvest import harvest_cmd
+from src.cli.commands.library import library_cmd
+from src.cli.commands.watch import watch_cmd
+from src.continuous.candidates import Candidate, CandidateStore
+
+from .conftest import make_trial
+
+
+def _write_skill(skills_dir: Path, name: str, description: str) -> None:
+    d = skills_dir / name
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(f"---\nname: {name}\ndescription: {description}\n---\n\nbody")
+
+
+def _project(tmp_path: Path, continuous_toml: str = "") -> Path:
+    evoskill = tmp_path / ".evoskill"
+    evoskill.mkdir()
+    (evoskill / "config.toml").write_text('[harness]\nname = "claude"\n' + continuous_toml)
+    return evoskill / "config.toml"
+
+
+class TestHarvestCli:
+    def test_dry_run_collects_and_clusters(self, tmp_path):
+        cfg = _project(tmp_path)
+        traces = tmp_path / "traces"
+        # three failing trials with identical task text → one cluster
+        for i in range(3):
+            make_trial(traces, f"t{i}__X{i}", reward="0", task_name=f"bench/t{i}")
+        result = CliRunner().invoke(harvest_cmd, [
+            "--config", str(cfg), "--traces", str(traces),
+            "--source", "harbor", "--dry-run", "--min-cluster-size", "1",
+        ])
+        assert result.exit_code == 0, result.output
+        assert "Collected 3 episode(s)" in result.output
+        assert "no candidates written" in result.output
+
+    def test_no_usable_sources_errors(self, tmp_path):
+        cfg = _project(tmp_path)
+        # jsonl source but no jsonl_path configured → build_readers yields nothing
+        result = CliRunner().invoke(harvest_cmd, ["--config", str(cfg), "--source", "jsonl"])
+        assert result.exit_code == 1
+        assert "no usable trace sources" in result.output
+
+
+class TestCandidatesCli:
+    def test_empty(self, tmp_path):
+        cfg = _project(tmp_path)
+        result = CliRunner().invoke(candidates_cmd, ["--config", str(cfg)])
+        assert result.exit_code == 0
+        assert "No candidates yet" in result.output
+
+    def test_list_and_show(self, tmp_path):
+        cfg = _project(tmp_path)
+        from src.cli.config import load_config
+        store = CandidateStore(load_config(config_path=cfg).continuous_candidates_dir)
+        store.save(Candidate(
+            candidate_id="my-skill-abc",
+            skill_name="my-skill",
+            skill_markdown="---\nname: my-skill\ndescription: d\n---\nthe body rule",
+            target_pattern="recurring thing",
+            episode_ids=["e1", "e2", "e3"],
+            cluster_size=3,
+        ))
+
+        listing = CliRunner().invoke(candidates_cmd, ["--config", str(cfg)])
+        assert listing.exit_code == 0
+        assert "my-skill-abc" in listing.output
+        assert "1 candidate(s)" in listing.output
+
+        shown = CliRunner().invoke(candidates_cmd, ["--config", str(cfg), "--show", "my-skill-abc"])
+        assert shown.exit_code == 0
+        assert "the body rule" in shown.output
+        assert "recurring thing" in shown.output  # full pattern, not truncated in --show
+
+    def test_show_missing(self, tmp_path):
+        cfg = _project(tmp_path)
+        result = CliRunner().invoke(candidates_cmd, ["--config", str(cfg), "--show", "nope"])
+        assert result.exit_code == 1
+        assert "no candidate" in result.output
+
+    def test_status_filter(self, tmp_path):
+        cfg = _project(tmp_path)
+        from src.cli.config import load_config
+        store = CandidateStore(load_config(config_path=cfg).continuous_candidates_dir)
+        store.save(Candidate(candidate_id="a", skill_name="a", skill_markdown="x", episode_ids=["e"]))
+        store.save(Candidate(candidate_id="b", skill_name="b", skill_markdown="y",
+                             episode_ids=["f"], status="graduated"))
+        result = CliRunner().invoke(candidates_cmd, ["--config", str(cfg), "--status", "graduated"])
+        assert result.exit_code == 0
+        assert "b" in result.output
+        # 'a' (pending) should be filtered out of the table rows
+        assert "1 candidate(s)" in result.output
+
+
+class TestLibraryCli:
+    # Force lexical similarity so tests never hit a real embedding API.
+    # Lower dedupe threshold to match lexical cosine scores (~0.78 for paraphrases).
+    LEXICAL = '\n[continuous.lifecycle]\nsimilarity_backend = "lexical"\ndedupe_similarity = 0.6\n'
+
+    def test_empty(self, tmp_path):
+        cfg = _project(tmp_path)
+        result = CliRunner().invoke(library_cmd, ["--config", str(cfg)])
+        assert result.exit_code == 0
+        assert "No skills yet" in result.output
+
+    def test_list_with_stats(self, tmp_path):
+        cfg = _project(tmp_path)
+        _write_skill(tmp_path / ".claude" / "skills", "preserve-units", "include units")
+        result = CliRunner().invoke(library_cmd, ["--config", str(cfg)])
+        assert result.exit_code == 0
+        assert "preserve-units" in result.output
+        assert "1 skill(s)" in result.output
+
+    def test_duplicates(self, tmp_path):
+        cfg = _project(tmp_path, self.LEXICAL)
+        sd = tmp_path / ".claude" / "skills"
+        _write_skill(sd, "preserve-units", "always include measurement units in answers")
+        _write_skill(sd, "keep-units", "always include measurement units in answers please")
+        _write_skill(sd, "read-tables", "extract figures from financial tables")
+        result = CliRunner().invoke(library_cmd, ["--config", str(cfg), "--duplicates"])
+        assert result.exit_code == 0
+        # the two near-identical unit skills should be flagged similar
+        assert "preserve-units" in result.output and "keep-units" in result.output
+
+    def test_select(self, tmp_path):
+        cfg = _project(tmp_path, self.LEXICAL)
+        sd = tmp_path / ".claude" / "skills"
+        _write_skill(sd, "preserve-units", "include measurement units in numeric answers")
+        _write_skill(sd, "read-tables", "extract figures from financial tables")
+        result = CliRunner().invoke(
+            library_cmd, ["--config", str(cfg), "--select", "what units for this revenue value"])
+        assert result.exit_code == 0
+        assert "preserve-units" in result.output
+
+    def test_deprecated_empty(self, tmp_path):
+        cfg = _project(tmp_path)
+        result = CliRunner().invoke(library_cmd, ["--config", str(cfg), "--deprecated"])
+        assert result.exit_code == 0
+        assert "No deprecated skills" in result.output
+
+
+class TestGraduateCli:
+    def _candidate(self):
+        return Candidate(
+            candidate_id="units-abc", skill_name="preserve-units",
+            skill_markdown="---\nname: preserve-units\ndescription: d\n---\nrule",
+            episode_ids=["e1"], cluster_size=1,
+        )
+
+    def test_force_no_branch_installs(self, tmp_path):
+        cfg = _project(tmp_path)
+        from src.cli.config import load_config
+        loaded = load_config(config_path=cfg)
+        CandidateStore(loaded.continuous_candidates_dir).save(self._candidate())
+        # --force skips the gate (no LLM); --no-branch skips git
+        result = CliRunner().invoke(
+            graduate_cmd, ["--config", str(cfg), "--force", "--no-branch", "units-abc"])
+        assert result.exit_code == 0, result.output
+        assert "Graduated" in result.output
+        assert (loaded.skills_dir / "preserve-units" / "SKILL.md").is_file()
+        assert CandidateStore(loaded.continuous_candidates_dir).get("units-abc").status == "graduated"
+
+    def test_graduate_missing_candidate(self, tmp_path):
+        cfg = _project(tmp_path)
+        result = CliRunner().invoke(graduate_cmd, ["--config", str(cfg), "--force", "nope"])
+        assert result.exit_code == 1
+        assert "no candidate" in result.output
+
+    def test_reject(self, tmp_path):
+        cfg = _project(tmp_path)
+        from src.cli.config import load_config
+        store = CandidateStore(load_config(config_path=cfg).continuous_candidates_dir)
+        store.save(self._candidate())
+        result = CliRunner().invoke(reject_cmd, ["--config", str(cfg), "units-abc"])
+        assert result.exit_code == 0
+        assert store.get("units-abc").status == "rejected"
+
+    def test_reject_missing(self, tmp_path):
+        cfg = _project(tmp_path)
+        result = CliRunner().invoke(reject_cmd, ["--config", str(cfg), "nope"])
+        assert result.exit_code == 1
+
+
+class TestWatchCli:
+    def test_once_review_no_traces(self, tmp_path):
+        # review mode + empty traces dir → one tick, 0 episodes, no LLM/git needed.
+        cfg = _project(tmp_path)
+        (tmp_path / ".evoskill" / "harbor_jobs").mkdir(parents=True)
+        result = CliRunner().invoke(watch_cmd, ["--config", str(cfg), "--once"])
+        assert result.exit_code == 0, result.output
+        assert "Ran 1 tick(s)" in result.output
+        assert "0 episodes" in result.output
+
+    def test_no_usable_sources_errors(self, tmp_path):
+        cfg = _project(tmp_path, '\n[continuous]\ntrace_sources = ["jsonl"]\n')
+        result = CliRunner().invoke(watch_cmd, ["--config", str(cfg), "--once"])
+        assert result.exit_code == 1
+        assert "no usable trace sources" in result.output
