@@ -142,6 +142,26 @@ Also join us on [Discord](https://discord.gg/sentientfoundation) to discuss your
 
 ## Installation
 
+**One command (recommended):**
+
+```bash
+# Clone + install everything (Python deps, uv, optional agent CLIs)
+curl -fsSL https://raw.githubusercontent.com/sentient-agi/EvoSkill/main/install.sh | bash
+
+# Or, if you already cloned the repo:
+./install.sh
+
+# Install Python deps + all agent harness CLIs (macOS/Homebrew)
+./install.sh --all-agents
+
+# Install Python deps + specific agent CLIs
+./install.sh --agents claude,opencode
+```
+
+The installer handles Python 3.12+, [`uv`](https://github.com/astral-sh/uv), and `uv sync` automatically. Harbor is included in the Python package. Agent CLIs are optional — install only the harness you plan to use.
+
+**Manual install:**
+
 **Requirements:**
 - Python 3.12+
 - [`uv`](https://github.com/astral-sh/uv) (recommended) or `pip`
@@ -161,6 +181,11 @@ brew install --cask claude-code    # Claude Code
 brew install opencode              # OpenCode (v1.4.0+)
 brew install --cask codex          # Codex CLI
 brew install block-goose-cli       # Goose (v1.25.0+)
+```
+
+Harbor is included in the Python install above (`uv sync` / `pip install -e .`). Run this only if you need the Harbor CLI standalone:
+
+```bash
 pip install harbor                 # Harbor (containerized benchmarks)
 ```
 
