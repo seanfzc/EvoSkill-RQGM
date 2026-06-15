@@ -95,6 +95,7 @@ def _collect_api_keys() -> dict[str, str]:
         "LLM_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY",
         "GROQ_API_KEY", "MISTRAL_API_KEY", "TOGETHER_API_KEY",
         "DEEPSEEK_API_KEY", "XAI_API_KEY",
+        "FIREWORKS_API_KEY", "FIREWORKS_AI_API_KEY",
         # Infrastructure keys — needed by Harbor when env=daytona
         "DAYTONA_API_KEY",
     ]

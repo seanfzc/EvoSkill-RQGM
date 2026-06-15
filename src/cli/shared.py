@@ -47,6 +47,11 @@ def infer_provider(model: str) -> str:
     normalized = model.strip()
     if normalized.startswith("openrouter/"):
         return "openrouter"
+    if normalized.startswith(("fireworks/", "fireworks-ai/", "fireworks_ai/")):
+        return "fireworks"
+    if normalized.startswith("accounts/"):
+        # Bare Fireworks model id, e.g. "accounts/fireworks/models/...".
+        return "fireworks"
     if normalized.startswith("anthropic/"):
         return "anthropic"
     if normalized.startswith("openai/"):
@@ -68,6 +73,10 @@ def _normalize_provider_model(provider: str, model: str) -> str:
 
     if provider == "openrouter" and normalized.startswith("openrouter/"):
         return normalized[len("openrouter/") :]
+    if provider == "fireworks":
+        for prefix in ("fireworks_ai/", "fireworks-ai/", "fireworks/"):
+            if normalized.startswith(prefix):
+                return normalized[len(prefix) :]
     if provider == "anthropic" and normalized.startswith("anthropic/"):
         return normalized[len("anthropic/") :]
     if provider == "openai" and normalized.startswith("openai/"):
@@ -131,6 +140,25 @@ async def call_llm(provider: str, model: str, prompt: str) -> str:
             base_url="https://openrouter.ai/api/v1",
             api_key=api_key,
             default_headers=default_headers or None,
+        )
+        response = await client.chat.completions.create(
+            model=normalized_model,
+            max_tokens=16,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.choices[0].message.content
+
+    if provider == "fireworks":
+        try:
+            import openai
+        except ImportError as exc:
+            raise RuntimeError(
+                "openai package not installed. Run: uv add openai"
+            ) from exc
+
+        client = openai.AsyncOpenAI(
+            base_url="https://api.fireworks.ai/inference/v1",
+            api_key=api_key,
         )
         response = await client.chat.completions.create(
             model=normalized_model,

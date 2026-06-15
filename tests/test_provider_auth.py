@@ -57,6 +57,37 @@ def test_apply_provider_auth_env_mirrors_all_accepted_names(
     assert env["GEMINI_API_KEY"] == "google-key"
 
 
+@pytest.mark.parametrize(
+    "provider",
+    ["fireworks", "fireworks-ai", "fireworks_ai"],
+)
+def test_fireworks_aliases_resolve_fireworks_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+) -> None:
+    monkeypatch.delenv("FIREWORKS_AI_API_KEY", raising=False)
+    monkeypatch.setenv("FIREWORKS_API_KEY", "fireworks-key")
+
+    from src.harness.provider_auth import ensure_provider_api_key
+
+    assert ensure_provider_api_key(provider) == "fireworks-key"
+
+
+def test_apply_provider_auth_env_mirrors_fireworks_into_litellm_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FIREWORKS_API_KEY", "fireworks-key")
+    monkeypatch.delenv("FIREWORKS_AI_API_KEY", raising=False)
+
+    from src.harness.provider_auth import apply_provider_auth_env
+
+    env: dict[str, str] = {}
+    apply_provider_auth_env("fireworks-ai", env)
+
+    assert env["FIREWORKS_API_KEY"] == "fireworks-key"
+    assert env["FIREWORKS_AI_API_KEY"] == "fireworks-key"
+
+
 def test_ensure_provider_api_key_raises_clear_error_when_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

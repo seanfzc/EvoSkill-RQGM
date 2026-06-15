@@ -200,6 +200,9 @@ export OPENAI_API_KEY=your-key-here
 
 # OpenRouter (OpenCode / Goose / OpenHands harnesses)
 export OPENROUTER_API_KEY=your-key-here
+
+# Fireworks AI (OpenCode / OpenHands harnesses, LLM scorer)
+export FIREWORKS_API_KEY=your-key-here
 ```
 
 OpenRouter-backed evolution runs also accept `LLM_API_KEY`, but `OPENROUTER_API_KEY` is the preferred env var.
@@ -511,11 +514,20 @@ name = "opencode"
 model = "openrouter/openai/gpt-5-mini"
 ```
 
+Fireworks AI:
+
+```toml
+[harness]
+name = "openhands"   # or "opencode"
+model = "fireworks_ai/accounts/fireworks/models/llama-v3p1-70b-instruct"
+```
+
 Notes:
 - `claude` is Anthropic-only.
 - `codex` uses bare OpenAI model names such as `gpt-5`, `o3`, or `gpt-5.1-codex-mini`.
 - `opencode`, `goose`, and `openhands` are multi-provider harnesses and can also use Claude and OpenAI models.
 - `opencode`, `goose`, and `openhands` accept `provider/model` strings such as `anthropic/claude-sonnet-4-6`, `openai/gpt-5`, or `openrouter/openai/gpt-5-mini`.
+- Fireworks AI uses `FIREWORKS_API_KEY`. OpenHands (litellm) expects the `fireworks_ai/` prefix while OpenCode (models.dev) expects `fireworks-ai/`. Goose has no built-in Fireworks provider — use a manual OpenAI-compatible configuration.
 
 ### Scorer types
 
@@ -534,10 +546,12 @@ Notes:
 type = "llm"
 rubric = "Award 1.0 if the answer is numerically correct within 5%, 0.0 otherwise."
 model = "claude-sonnet-4-6"   # defaults to claude-sonnet-4-6
-provider = "anthropic"        # "anthropic", "openai", "google", or "openrouter"
+provider = "anthropic"        # "anthropic", "openai", "google", "openrouter", or "fireworks"
 ```
 
 For OpenRouter-backed scoring, set `provider = "openrouter"` and use an OpenRouter model ID such as `openai/gpt-5-mini` or `google/gemini-2.5-flash`. Authentication uses `OPENROUTER_API_KEY` and falls back to `LLM_API_KEY` if needed.
+
+For Fireworks-backed scoring, set `provider = "fireworks"` and use a Fireworks model ID such as `accounts/fireworks/models/llama-v3p1-70b-instruct`. Authentication uses `FIREWORKS_API_KEY`.
 
 **Script scorer options:**
 

@@ -15,6 +15,14 @@ PROVIDER_ENV_KEYS: dict[str, tuple[str, ...]] = {
     "together": ("TOGETHER_API_KEY",),
     "deepseek": ("DEEPSEEK_API_KEY",),
     "xai": ("XAI_API_KEY",),
+    # Fireworks AI. Aliases cover the different provider ids each consumer expects:
+    #   - opencode / models.dev → "fireworks-ai"
+    #   - litellm / openhands    → "fireworks_ai"
+    #   - scorer call_llm        → "fireworks"
+    # All resolve the same key; FIREWORKS_AI_API_KEY is mirrored for litellm.
+    "fireworks": ("FIREWORKS_API_KEY", "FIREWORKS_AI_API_KEY"),
+    "fireworks-ai": ("FIREWORKS_API_KEY", "FIREWORKS_AI_API_KEY"),
+    "fireworks_ai": ("FIREWORKS_API_KEY", "FIREWORKS_AI_API_KEY"),
 }
 
 
