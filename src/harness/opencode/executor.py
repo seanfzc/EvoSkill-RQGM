@@ -164,6 +164,23 @@ def _ensure_server(options: dict[str, Any]) -> str:
 
 # ── query execution ──────────────────────────────────────────────────
 
+def _as_message(chat_info: Any) -> dict[str, Any]:
+    """Coerce an opencode ``POST /session/{id}/message`` response into the
+    ``{"info": {...}, "parts": [...]}`` shape that :func:`parse_response` expects.
+
+    The server returns the full assistant message as ``{"info": ..., "parts": ...}``;
+    a bare info dict (optionally carrying a ``parts`` key) is also tolerated so the
+    parser keeps working if the response envelope changes across opencode versions.
+    """
+    if not isinstance(chat_info, dict):
+        return {"info": {}, "parts": []}
+    if isinstance(chat_info.get("info"), dict):
+        return {"info": chat_info["info"], "parts": chat_info.get("parts") or []}
+    parts = chat_info.get("parts") or []
+    info = {k: v for k, v in chat_info.items() if k != "parts"}
+    return {"info": info, "parts": parts}
+
+
 async def execute_query(options: dict[str, Any], query: str) -> list[Any]:
     if not isinstance(options, dict):
         raise TypeError(f"OpenCode executor requires dict options, got {type(options)}")
@@ -198,10 +215,16 @@ async def execute_query(options: dict[str, Any], query: str) -> list[Any]:
         r.raise_for_status()
         chat_info = r.json()
 
-        # 3. fetch full messages (with parts + structured output)
-        r = await client.get(f"/session/{session_id}/message")
-        r.raise_for_status()
-        messages = r.json()
+        # 3. derive the assistant message from the POST response above.
+        # We deliberately do NOT re-fetch via GET /session/{id}/message: on
+        # opencode 1.16.x–1.17.4 that GET returns 400 whenever the session used a
+        # json_schema format, because the server writes its own retryCount
+        # bookkeeping into the message ``format`` field and then rejects it on
+        # serialization (opencode #25430). The paid model call has already
+        # succeeded here, so the re-fetch only raises a spurious HTTPStatusError
+        # and forces a full (billable) retry. Each query runs in a fresh
+        # single-turn session, so chat_info is the complete reply.
+        messages = [_as_message(chat_info)]
 
     return [{"session_id": session_id, "chat_info": chat_info, "messages": messages}]
 

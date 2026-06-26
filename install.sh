@@ -29,9 +29,9 @@ yellow(){ printf "\033[33m%s\033[0m" "$1"; }
 red()   { printf "\033[31m%s\033[0m" "$1"; }
 dim()   { printf "\033[2m%s\033[0m" "$1"; }
 
-info()  { printf "  $(green '✓') %s\n" "$1"; }
-warn()  { printf "  $(yellow '!') %s\n" "$1"; }
-fail()  { printf "  $(red '✗') %s\n" "$1"; exit 1; }
+info()  { printf "  $(green '✓') %s\n" "$1" >&2; }
+warn()  { printf "  $(yellow '!') %s\n" "$1" >&2; }
+fail()  { printf "  $(red '✗') %s\n" "$1" >&2; exit 1; }
 
 usage() {
     cat <<'EOF'
@@ -80,7 +80,7 @@ ensure_repo() {
     fi
 
     local target="${INSTALL_DIR:-$(pwd)/EvoSkill}"
-    printf "\n  %s\n\n" "$(bold 'Cloning EvoSkill repository...')"
+    printf "\n  %s\n\n" "$(bold 'Cloning EvoSkill repository...')" >&2
 
     if [[ -d "$target/.git" ]]; then
         info "Repository already exists at $target"
@@ -115,7 +115,7 @@ find_python_312() {
 }
 
 try_install_python_312() {
-    printf "\n  %s\n" "$(bold 'Attempting to install Python 3.12...')"
+    printf "\n  %s\n" "$(bold 'Attempting to install Python 3.12...')" >&2
 
     if [[ "$(uname -s)" == "Darwin" ]] && command -v brew &>/dev/null; then
         if brew install python@3.12; then

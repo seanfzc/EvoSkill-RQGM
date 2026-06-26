@@ -552,7 +552,9 @@ def _make_opencode_payload(info=None, parts=None, session_id="sess-456", cost=0.
 
     return {
         "session_id": session_id,
-        "chat_info": assistant_info,
+        # opencode's POST /session/{id}/message returns the full assistant
+        # message ({info, parts}); mirror that real shape here.
+        "chat_info": {"info": assistant_info, "parts": raw_parts},
         "messages": [{"info": assistant_info, "parts": raw_parts}],
     }
 
@@ -564,6 +566,96 @@ def _make_opencode_get_options(provider_id="anthropic", model_id="claude-sonnet-
         "model": f"{provider_id}/{model_id}",
         "tools": tools or {"read": True, "bash": True},
     }
+
+
+class TestOpencodeExecuteQuery:
+    """execute_query must not re-fetch messages after the chat POST.
+
+    Regression for opencode #25430: GET /session/{id}/message 400s on
+    json_schema sessions, which previously crashed every structured-output
+    query after the (already billed) model call succeeded.
+    """
+
+    def test_does_not_refetch_messages_after_chat_post(self, monkeypatch):
+        from src.harness.opencode import executor as oc
+
+        # opencode's POST /session/{id}/message returns the full assistant message.
+        assistant_msg = {
+            "info": {
+                "role": "assistant",
+                "structured": {"final_answer": "4", "reasoning": "math"},
+                "cost": 0.01,
+                "tokens": {"input": 5},
+            },
+            "parts": [{"type": "text", "text": "the answer is 4"}],
+        }
+
+        class _Resp:
+            def __init__(self, data):
+                self._data = data
+
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return self._data
+
+        class _FakeClient:
+            def __init__(self, *args, **kwargs):
+                self.gets: list[str] = []
+                self.posts: list[str] = []
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def post(self, url, json=None):
+                self.posts.append(url)
+                if url == "/session":
+                    return _Resp({"id": "sess-1"})
+                if url.endswith("/message"):
+                    return _Resp(assistant_msg)
+                raise AssertionError(f"unexpected POST {url}")
+
+            async def get(self, url):
+                self.gets.append(url)
+                raise AssertionError(
+                    f"execute_query must not GET {url} — it 400s on json_schema "
+                    "sessions (opencode #25430)"
+                )
+
+        clients: list[_FakeClient] = []
+
+        def _factory(*args, **kwargs):
+            client = _FakeClient(*args, **kwargs)
+            clients.append(client)
+            return client
+
+        monkeypatch.setattr(oc, "_ensure_server", lambda options: "http://127.0.0.1:0")
+        monkeypatch.setattr(oc, "ensure_provider_api_key", lambda provider: "key")
+        monkeypatch.setattr(oc.httpx, "AsyncClient", _factory)
+
+        result = asyncio.run(
+            oc.execute_query(
+                {
+                    "provider_id": "fireworks-ai",
+                    "model_id": "minimax-m2p7",
+                    "format": {"type": "json_schema"},
+                },
+                "what is 2+2?",
+            )
+        )
+
+        # No message re-fetch happened (the GET would have raised).
+        assert clients and clients[0].gets == []
+        # The POST response alone is enough to parse structured output.
+        fields = opencode_parse(result, AgentResponse, _make_opencode_get_options())
+        assert fields["output"] is not None
+        assert fields["output"].final_answer == "4"
+        assert fields["parse_error"] is None
+        assert fields["total_cost_usd"] == 0.01
 
 
 class TestOpencodeParseResponse:
