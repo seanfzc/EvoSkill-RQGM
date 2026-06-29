@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Generic, TypeVar
@@ -9,6 +10,21 @@ from typing import Any, Callable, Generic, TypeVar
 from src.harness import Agent, AgentTrace, is_claude_sdk, is_opencode_sdk, is_openhands_sdk, is_goose_sdk, is_codex_sdk
 from src.cache import RunCache, CacheConfig
 from src.registry.sdk_utils import options_to_config
+
+# ── RQGM imports ─────────────────────────────────────────────────────────
+from src.loop.config import RQGMConfig
+from src.loop.epoch import (
+    AdversarialExample,
+    EpochConfig,
+    EpochManager,
+    EpochTransition,
+    TransitionReason,
+    DEFAULT_TOLERANCES,
+)
+from src.evaluation.utility_evolution import UtilityEvolution
+# ── end RQGM ─────────────────────────────────────────────────────────────
+
+logger = logging.getLogger(__name__)
 
 
 def _log(phase: str, message: str = "", indent: int = 0) -> None:
@@ -26,7 +42,12 @@ def _log(phase: str, message: str = "", indent: int = 0) -> None:
         print(f"{prefix}{message}")
 
 
-def _score_multi_tolerance(question: str, predicted: str, ground_truth: str) -> float:
+def _score_multi_tolerance(
+    question: str,
+    predicted: str,
+    ground_truth: str,
+    tolerances: list[float] | None = None,
+) -> float:
     """Score answer using weighted average across tolerance levels.
 
     Weights favor stricter tolerances: weight = 1 / (1 + 20 * tolerance)
@@ -36,13 +57,22 @@ def _score_multi_tolerance(question: str, predicted: str, ground_truth: str) -> 
       - 2.5%  tolerance: 0.67
       - 5.0%  tolerance: 0.50
       - 10.0% tolerance: 0.33
+
+    Args:
+        question: The question text (unused, kept for API compatibility).
+        predicted: The agent's answer.
+        ground_truth: The reference answer.
+        tolerances: Tolerance schedule to use. If None, uses TOLERANCE_LEVELS.
+                    In RQGM mode the runner passes epoch-local tolerances here.
     """
     if not str(predicted or "").strip():
         return 0.0
 
+    active_tolerances = tolerances if tolerances is not None else TOLERANCE_LEVELS
+
     weighted_sum = 0.0
     weight_total = 0.0
-    for tol in TOLERANCE_LEVELS:
+    for tol in active_tolerances:
         weight = 1.0 / (1.0 + 20.0 * tol)
         score = score_answer(ground_truth, predicted, tol)
         weighted_sum += weight * score
@@ -122,6 +152,7 @@ class SelfImprovingLoop:
         scorer: Callable[[str, str, str], float] | None = None,
         on_event: Callable[[str, dict[str, Any]], None] | None = None,
         task_constraints: str = "",
+        rqgm_config: RQGMConfig | None = None,
     ):
         """Initialize the self-improving loop.
 
@@ -133,6 +164,8 @@ class SelfImprovingLoop:
             val_data: Validation data as list of (question, answer, category) tuples.
             scorer: Scoring function (question, predicted, ground_truth) -> float.
                     Defaults to _score_multi_tolerance for backward compatibility.
+            rqgm_config: Optional RQGM co-evolution configuration. When None or
+                         enabled=False, all epoch logic is skipped.
         """
         self.config = config
         self.agents = agents
@@ -176,6 +209,21 @@ class SelfImprovingLoop:
         self._total_cost: float = 0.0
         self._iter_cost: float = 0.0
 
+        # ── RQGM: epoch management ─────────────────────────────────────────
+        self._rqgm_config: RQGMConfig = rqgm_config or RQGMConfig(enabled=False)
+
+        if self._rqgm_config.enabled:
+            epoch_cfg = self._rqgm_config.epoch_config
+            self._epoch_manager = EpochManager(
+                config=epoch_cfg,  # type: ignore[arg-type]
+                initial_tolerances=list(DEFAULT_TOLERANCES),
+            )
+            self._utility_evolution = UtilityEvolution(epoch_config=epoch_cfg)  # type: ignore[arg-type]
+        else:
+            self._epoch_manager = None      # type: ignore[assignment]
+            self._utility_evolution = None  # type: ignore[assignment]
+        # ── end RQGM ──────────────────────────────────────────────────────
+
     def _emit(self, event: str, **data: Any) -> None:
         """Fire an event to the display callback if one is registered."""
         if self.on_event is not None:
@@ -191,6 +239,12 @@ class SelfImprovingLoop:
             "iteration": iteration,
             "category_offset": self._category_offset,
             "per_cat_offset": self._per_cat_offset,
+            # ── RQGM additions ───────────────────────────────────────────
+            "rqgm_epoch": (
+                self._epoch_manager.to_checkpoint_dict()  # type: ignore[union-attr]
+                if self._epoch_manager is not None
+                else None
+            ),
         }
         self._checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
         self._checkpoint_path.write_text(json.dumps(checkpoint, indent=2))
@@ -207,6 +261,20 @@ class SelfImprovingLoop:
             checkpoint = json.loads(self._checkpoint_path.read_text())
             self._category_offset = checkpoint["category_offset"]
             self._per_cat_offset = checkpoint["per_cat_offset"]
+            # ── RQGM: restore epoch manager state ─────────────────────────
+            rqgm_data = checkpoint.get("rqgm_epoch")
+            if rqgm_data is not None and self._epoch_manager is not None:
+                restored = EpochManager.from_checkpoint_dict(
+                    data=rqgm_data,
+                    config=self._rqgm_config.epoch_config,  # type: ignore[arg-type]
+                )
+                self._epoch_manager = restored  # type: ignore[assignment]
+                logger.info(
+                    "RQGM checkpoint restored: epoch_index=%d, tolerances=%s",
+                    restored.epoch_index,
+                    restored.current_tolerances,
+                )
+            # ── end RQGM ──────────────────────────────────────────────────
             return checkpoint["iteration"]
         except (json.JSONDecodeError, KeyError) as e:
             _log("WARN", f"Invalid checkpoint file, ignoring: {e}")
@@ -275,6 +343,16 @@ class SelfImprovingLoop:
             _log(f"ITER {iteration_count}/{self.config.max_iterations}", f"Parent: {parent}")
             self._emit("iter_start", iteration=actual_iteration, total=self.config.max_iterations, parent=parent)
 
+            # ── RQGM: epoch boundary check ────────────────────────────────
+            _rqgm_active = self._rqgm_config.enabled and self._epoch_manager is not None
+            _at_epoch_boundary: bool = (
+                _rqgm_active
+                and self._epoch_manager.is_epoch_boundary(actual_iteration)  # type: ignore[union-attr]
+            )
+            # _at_epoch_boundary is False when rqgm_config.enabled=False,
+            # so the entire RQGM block is a no-op in that case.
+            # ── end RQGM ──────────────────────────────────────────────────
+
             # Round-robin sampling: pick samples_per_category from each of N categories (cycling)
             n_cats_this_iter = min(self.config.categories_per_batch, n_cats)
 
@@ -311,11 +389,40 @@ class SelfImprovingLoop:
                 agent_answer = (
                     trace.output.final_answer if trace.output and trace.output.final_answer else "[PARSE FAILED]"
                 )
+                # RQGM: pass epoch-local tolerances to the scorer.
+                # When rqgm disabled, tolerances=None falls back to static defaults.
+                _active_tols = (
+                    self._epoch_manager.current_tolerances  # type: ignore[union-attr]
+                    if _rqgm_active else None
+                )
                 avg_score = self.scorer(
                     question,
                     agent_answer.strip().lower(),
                     answer.strip().lower(),
                 )
+                # ── RQGM: adversarial pool collection ──────────────────────
+                if _rqgm_active:
+                    _loose_tol = max(self._epoch_manager.current_tolerances)  # type: ignore[union-attr]
+                    _strict_tol = 0.0
+                    _loose_score = score_answer(answer.strip().lower(), agent_answer.strip().lower(), _loose_tol)
+                    _strict_score = score_answer(answer.strip().lower(), agent_answer.strip().lower(), _strict_tol)
+                    _rqgm_cfg = self._rqgm_config
+                    if (
+                        _loose_score >= _rqgm_cfg.adversarial_high_score_threshold
+                        and _strict_score < _rqgm_cfg.adversarial_strict_threshold
+                    ):
+                        self._epoch_manager.record_adversarial_example(  # type: ignore[union-attr]
+                            AdversarialExample(
+                                question=question,
+                                agent_answer=agent_answer,
+                                ground_truth=answer,
+                                loose_score=_loose_score,
+                                strict_score=_strict_score,
+                                iteration=actual_iteration,
+                                epoch_index=self._epoch_manager.epoch_index,  # type: ignore[union-attr]
+                            )
+                        )
+                # ── end RQGM ──────────────────────────────────────────────
                 status = "[OK]" if avg_score >= 0.8 else "[FAIL]"
                 if self.on_event is None:
                     _log("", f"    {status} [{category}] {question[:40]}...")
@@ -338,6 +445,8 @@ class SelfImprovingLoop:
 
             # Run proposer with all failures (use actual iteration number with offset)
             mutation_result = await self._mutate_with_fallback(parent, failures, actual_iteration)
+
+            child_score: float | None = None
 
             if mutation_result is None:
                 no_improvement_count += 1
@@ -390,6 +499,78 @@ class SelfImprovingLoop:
             if no_improvement_count >= self.config.no_improvement_limit:
                 _log("STOP", f"No improvement for {self.config.no_improvement_limit} iterations")
                 break
+
+            # ── RQGM: record iteration result in epoch manager ────────────
+            if _rqgm_active:
+                # Get best frontier score for epoch tracking
+                _frontier_scores = self.manager.get_frontier_with_scores()
+                _best_frontier_score = _frontier_scores[0][1] if _frontier_scores else 0.0
+                # Use child_score if available, otherwise parent_score
+                _track_score: float = child_score if child_score is not None else parent_score
+                self._epoch_manager.record_iteration_result(  # type: ignore[union-attr]
+                    iteration=actual_iteration,
+                    best_frontier_score=_best_frontier_score,
+                    score_at_strict_tol=_track_score,   # approximate — strict tol is 0.0
+                    score_at_loose_tol=_track_score,     # approximate — loose tol is max
+                )
+            # ── end RQGM ──────────────────────────────────────────────────
+
+            # ── RQGM: epoch boundary actions ──────────────────────────────
+            if _at_epoch_boundary:
+                # 1. Evaluate boundary: get transition instructions.
+                transition: EpochTransition = self._epoch_manager.evaluate_epoch_boundary(  # type: ignore[union-attr]
+                    current_iteration=actual_iteration,
+                )
+
+                # 2. Log to feedback_history.md.
+                append_feedback(
+                    self._feedback_path,
+                    f"epoch-{self._epoch_manager.epoch_index}",  # type: ignore[union-attr]
+                    "RQGM epoch transition",
+                    transition.log_message,
+                    outcome="transition",
+                    score=0.0,
+                    parent_score=0.0,
+                    active_skills=self._get_active_skills(),
+                )
+
+                # 3. Tolerance update.
+                if transition.reason != TransitionReason.NO_TRANSITION:
+                    logger.info(
+                        "RQGM utility transition at iteration %d (epoch %d): %s",
+                        actual_iteration,
+                        self._epoch_manager.epoch_index,  # type: ignore[union-attr]
+                        transition.reason.name,
+                    )
+
+                # 4. Cache flush (coupling warning #2).
+                if (
+                    transition.trigger_selective_erasure
+                    and self._rqgm_config.cache_flush_on_boundary
+                    and self.cache is not None
+                ):
+                    logger.info("RQGM: flushing RunCache due to tolerance change.")
+                    self.cache = None  # Disable cache for one epoch; rebuilds next iteration.
+
+                # 5. Selective erasure (Phase 6 — HIGH RISK, gated behind flag).
+                if (
+                    transition.trigger_selective_erasure
+                    and self._rqgm_config.selective_erasure_enabled
+                ):
+                    logger.warning(
+                        "RQGM selective erasure requested but "
+                        "selective_erasure_enabled=False — skipping. "
+                        "Enable in RQGMConfig when Phase 6 is ready."
+                    )
+
+                # 6. Reset no_improvement_count if erasure fired (coupling warning #3).
+                if transition.reset_no_improvement_count:
+                    no_improvement_count = 0
+                    logger.info("RQGM: reset no_improvement_count after boundary.")
+
+                # 7. Commit epoch state changes in the manager.
+                self._epoch_manager.advance_epoch(transition)  # type: ignore[union-attr]
+            # ── end RQGM epoch boundary ────────────────────────────────────
 
             # Print frontier status
             frontier_str = ", ".join(f"{n}:{s:.2f}" for n, s in self.manager.get_frontier_with_scores())
