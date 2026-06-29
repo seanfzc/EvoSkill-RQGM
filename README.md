@@ -8,8 +8,8 @@
 <p align="center">
   <a href="https://arxiv.org/abs/2606.26294"><img src="https://img.shields.io/badge/RQGM%20Paper-2606.26294-b31b1b.svg?logo=arxiv&style=for-the-badge" alt="RQGM Paper"></a>
   <a href="https://www.alphaxiv.org/abs/2603.02766"><img src="https://img.shields.io/badge/EvoSkill%20Paper-2603.02766-f73c6f?style=for-the-badge" alt="EvoSkill Paper"></a>
-  <a href="https://github.com/seanfzc/EvoSkill-RQGM/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-007ec6?style=for-the-badge" alt="License: Apache 2.0"></a>
-  <a href="https://github.com/seanfzc/EvoSkill-RQGM"><img src="https://img.shields.io/badge/GitHub-EvoSkill--RQGM-181717?logo=github&style=for-the-badge" alt="GitHub"></a>
+  <a href="https://github.com/observeco/EvoSkill-RQGM/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-007ec6?style=for-the-badge" alt="License: Apache 2.0"></a>
+  <a href="https://github.com/observeco/EvoSkill-RQGM"><img src="https://img.shields.io/badge/GitHub-EvoSkill--RQGM-181717?logo=github&style=for-the-badge" alt="GitHub"></a>
 </p>
 
 **EvoSkill-RQGM** extends [EvoSkill](https://github.com/sentient-agi/EvoSkill) with the **Red Queen Gödel Machine** (arXiv 2606.26294, Cambridge, June 2026) — a framework for recursive self-improvement where the **evaluator co-evolves with the agent**, preventing reward hacking and stalled improvement loops.
@@ -96,7 +96,7 @@ Epoch 1 (tolerances: [0.0, 0.001, 0.01, 0.025, 0.05])
 ### 1. Install
 
 ```bash
-git clone https://github.com/seanfzc/EvoSkill-RQGM.git
+git clone https://github.com/observeco/EvoSkill-RQGM.git
 cd EvoSkill-RQGM
 uv sync
 ```
