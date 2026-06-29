@@ -1,31 +1,191 @@
 <div align="center">
-    <img src="./assets/evoskill_logo.png" alt="alt text" width="80%"/>
+    <img src="./assets/evoskill_logo.png" alt="EvoSkill-RQGM" width="80%"/>
     <br>
-    <h1>EvoSkill: Automated Skill Discovery for Coding Agents</h1>
+    <h1>EvoSkill-RQGM: Co-Evolving Agents and Evaluators</h1>
+    <h3>First open implementation of the Red Queen Gödel Machine</h3>
 </div>
 
-
 <p align="center">
-  <a href="https://www.alphaxiv.org/abs/2603.02766"><img src="https://img.shields.io/badge/Paper-f73c6f?style=for-the-badge" alt="Paper"></a>
-  <a href="https://www.sentient.xyz/blog/evoskill-automated-skill-induction-from-agent-failures"><img src="https://img.shields.io/badge/Blog-f73c6f?style=for-the-badge" alt="Blog"></a>
-  <a href="https://sentient.xyz"><img src="https://img.shields.io/badge/Built%20by-Sentient%20Labs-f73c6f?style=for-the-badge" alt="Built by Sentient Labs"></a>
-  <a href="https://x.com/SentientAGI"> <img src="https://img.shields.io/badge/-SentientAGI-grey?logo=x&style=for-the-badge"/>
-  <a href="https://github.com/sentient-agi/EvoSkill/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache 2.0-007ec6?style=for-the-badge" alt="License: Apache 2.0"></a>
+  <a href="https://arxiv.org/abs/2606.26294"><img src="https://img.shields.io/badge/RQGM%20Paper-2606.26294-b31b1b.svg?logo=arxiv&style=for-the-badge" alt="RQGM Paper"></a>
+  <a href="https://www.alphaxiv.org/abs/2603.02766"><img src="https://img.shields.io/badge/EvoSkill%20Paper-2603.02766-f73c6f?style=for-the-badge" alt="EvoSkill Paper"></a>
+  <a href="https://github.com/seanfzc/EvoSkill-RQGM/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-007ec6?style=for-the-badge" alt="License: Apache 2.0"></a>
+  <a href="https://github.com/seanfzc/EvoSkill-RQGM"><img src="https://img.shields.io/badge/GitHub-EvoSkill--RQGM-181717?logo=github&style=for-the-badge" alt="GitHub"></a>
 </p>
 
-<b>Turn your general AI agents into state-of-the-art specialists with a benchmark and EvoSkill, a toolkit for automatically creating and improving AI skills, compatible with Claude Code, Codex CLI, OpenCode, OpenHands, Goose, Harbor, and more.</b>
+**EvoSkill-RQGM** extends [EvoSkill](https://github.com/sentient-agi/EvoSkill) with the **Red Queen Gödel Machine** (arXiv 2606.26294, Cambridge, June 2026) — a framework for recursive self-improvement where the **evaluator co-evolves with the agent**, preventing reward hacking and stalled improvement loops.
 
-<b>EvoSkill</b> significantly extends the feedback-driven idea of <b>[GEPA](https://github.com/sentient-agi/gepa-plus)</b> from single-file optimization to complete agent evolution. Instead of only revising one prompt in place like GEPA, EvoSkill proposes multiple skill and prompt mutations jointly, evaluates new variants on held-out data, and has each iteration produce an entirely new agent program.
+> **The problem:** Self-improving agents learn to satisfy a fixed evaluator rather than genuinely improving. The moment the judge stops getting harder, the loop stalls and reward hacking creeps in.
+>
+> **The structural answer:** Co-evolve the agent AND its evaluator together, so the bar keeps rising as the agent climbs.
 
-<p align="center">
-  <img src="./assets/examples.png" alt="EvoSkill Architecture" style="width: 75%;">
-</p>
+---
 
-Install in seconds, then run `evoskill init` and `evoskill run` to supercharge any coding agent with <b>AI-created skills and prompts</b> automatically. Depending on the agent, you are free to use <b>any model provider</b> of your choice ([OpenRouter](https://openrouter.ai/models?q=g), [Anthropic](https://platform.claude.com/docs/en/about-claude/models/overview), [OpenAI](https://platform.openai.com/), [Fireworks](https://fireworks.ai/), and more) and <b>any model</b> you want (Claude, GLM, Minimax, Kimi, GPT, Gemini, Qwen, and others).
+## What RQGM Adds
 
-Also join us on [Discord](https://discord.gg/sentientfoundation) to discuss your experience, share suggestions, or show off your work!
+| Feature | Vanilla EvoSkill | EvoSkill-RQGM |
+|---------|-----------------|---------------|
+| **Evaluator** | Fixed tolerance schedule | **Epoch-based utility evolution** — tolerances tighten when exploitation detected |
+| **Scoring** | Static multi-tolerance | **Adversarial scoring** — penalises answers that game loose criteria |
+| **Failure detection** | Hardcoded 0.8 threshold | **Adaptive** — threshold shifts with evaluator evolution |
+| **Reward hacking** | Not detected | **Hack ratio analysis** — flags when agent scores well under loose but poorly under strict |
+| **Checkpoint** | Iteration state only | **Full epoch state** — tolerances, adversarial pool, epoch index |
+| **Feature flag** | — | `rqgm_config.enabled=False` (safe default, zero behavior change) |
 
-## 🤖 Supported agents
+### Key Results from the RQGM Paper
+
+| Domain | Improvement |
+|--------|-------------|
+| **Coding (verifiable tasks)** | 1.35x–1.72x **fewer tokens** than prior SOTA |
+| **Scientific paper writing** | 1.78x–1.86x **higher acceptance rates** |
+| **Olympiad-level proof grading** | **9% higher** ground-truth accuracy |
+| **Paper reviewing (adversarial)** | Corrects 1.91x over-acceptance of AI-generated papers |
+
+---
+
+## How RQGM Works
+
+The self-improvement loop is divided into **epochs**, each with a *frozen* evaluator configuration. At epoch boundaries, the system analyses whether the agent has begun exploiting the current evaluator and, if so, triggers a utility transition:
+
+```
+Epoch 0 (tolerances: [0.0, 0.001, 0.01, 0.025, 0.05, 0.1])
+  ├── Iteration 1: score 0.42
+  ├── Iteration 2: score 0.51
+  ├── Iteration 3: score 0.49
+  ├── Iteration 4: score 0.53
+  └── Iteration 5: score 0.55
+       │
+       └── Boundary check:
+            ├── Hack ratio = 0.48 (strict/loose) → exploitation detected
+            └── Drop loosest tolerance (0.1) → tighten evaluator
+
+Epoch 1 (tolerances: [0.0, 0.001, 0.01, 0.025, 0.05])
+  └── ... evaluator gets harder as agent improves
+```
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    EvoSkill-RQGM                         │
+│                                                         │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐          │
+│  │ Proposer │───▶│Generator │───▶│Evaluator │          │
+│  │ (mutate) │    │ (create) │    │ (score)  │          │
+│  └──────────┘    └──────────┘    └──────────┘          │
+│                                       │                 │
+│                              ┌────────▼────────┐       │
+│                              │  EpochManager    │       │
+│                              │  ┌────────────┐  │       │
+│                              │  │ Hack Ratio  │  │       │
+│                              │  │  Analysis   │  │       │
+│                              │  ├────────────┤  │       │
+│                              │  │  Tolerance  │  │       │
+│                              │  │  Evolution  │  │       │
+│                              │  ├────────────┤  │       │
+│                              │  │ Adversarial │  │       │
+│                              │  │    Pool     │  │       │
+│                              │  └────────────┘  │       │
+│                              └──────────────────┘       │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Quickstart
+
+### 1. Install
+
+```bash
+git clone https://github.com/seanfzc/EvoSkill-RQGM.git
+cd EvoSkill-RQGM
+uv sync
+```
+
+### 2. Initialize a project
+
+```bash
+evoskill init
+```
+
+Follow the prompts to select your agent runtime, dataset, and task description.
+
+### 3. Run with RQGM enabled
+
+```bash
+evoskill run --rqgm
+```
+
+Or via config:
+
+```toml
+# .evoskill/config.toml
+[evolution]
+mode = "skill_only"
+iterations = 20
+frontier_size = 3
+
+[rqgm]
+enabled = true
+epoch_size = 5
+```
+
+### 4. Run without RQGM (vanilla EvoSkill)
+
+```bash
+evoskill run
+```
+
+No config changes needed — RQGM is **disabled by default** for full backward compatibility.
+
+---
+
+## RQGM Configuration Reference
+
+Add to `.evoskill/config.toml`:
+
+```toml
+[rqgm]
+enabled = false                          # Master flag. Set true to activate.
+epoch_size = 5                           # Iterations per epoch
+min_improvement_threshold = 0.02          # Min frontier improvement per epoch
+exploitation_hack_ratio_threshold = 0.6  # strict/loose ratio below = hacking
+adversarial_high_score_threshold = 0.85  # Loose score threshold for gaming detection
+adversarial_strict_threshold = 0.4       # Strict score threshold for gaming detection
+selective_erasure_enabled = false        # HIGH RISK: invalidate stale frontier scores
+cache_flush_on_boundary = true           # Flush RunCache when tolerances change
+max_adversarial_examples_per_proposer = 5
+```
+
+### Python API
+
+```python
+from src.api import EvoSkill
+from src.loop.config import RQGMConfig
+
+rqgm_config = RQGMConfig(
+    enabled=True,
+    epoch_size=5,
+)
+
+evo = EvoSkill(
+    task="sealqa",
+    model="sonnet",
+    mode="skill_only",
+    max_iterations=20,
+    rqgm_config=rqgm_config,
+)
+result = await evo.run()
+```
+
+---
+
+## EvoSkill (Base Framework)
+
+EvoSkill is a toolkit for automatically creating and improving AI agent skills, compatible with Claude Code, Codex CLI, OpenCode, OpenHands, Goose, Harbor, and more.
+
+**Turn your general AI agents into state-of-the-art specialists** with a benchmark and EvoSkill's self-improvement loop. Install in seconds, then run `evoskill init` and `evoskill run` to supercharge any coding agent with AI-created skills and prompts automatically.
+
+### 🤖 Supported agents
 
 <table>
   <thead>
@@ -67,9 +227,9 @@ Also join us on [Discord](https://discord.gg/sentientfoundation) to discuss your
       <td>Containerized task benchmarks with built-in verifiers</td>
     </tr>
   </tbody>
-</table>   
+</table>
 
-## 🎨 Features
+### 🎨 Features
 
 <table>
   <thead>
@@ -80,6 +240,13 @@ Also join us on [Discord](https://discord.gg/sentientfoundation) to discuss your
     </tr>
   </thead>
   <tbody>
+    <tr>
+      <td><b>Co-evolving evaluator (RQGM)</b></td>
+      <td>✅</td>
+      <td>
+        Epoch-based utility evolution prevents reward hacking. First open implementation of the Red Queen Gödel Machine.
+      </td>
+    </tr>
     <tr>
       <td><b>Evolution with a benchmark</b></td>
       <td>✅</td>
@@ -125,10 +292,13 @@ Also join us on [Discord](https://discord.gg/sentientfoundation) to discuss your
   </tbody>
 </table>
 
+---
+
 ## Table of Contents
 
 - [Installation](#installation)
 - [Quickstart](#quickstart)
+- [RQGM Configuration](#rqgm-configuration-reference)
 - [Harbor Integration](#harbor-integration)
 - [CLI Reference](#cli-reference)
 - [Configuration Reference](#configuration-reference)
@@ -139,6 +309,7 @@ Also join us on [Discord](https://discord.gg/sentientfoundation) to discuss your
 - [Citation](#citation)
 - [License](#license)
 
+---
 
 ## Installation
 
@@ -274,6 +445,14 @@ Return only the numeric answer with units.
 
 ### 3. Run the loop
 
+**With RQGM (co-evolving evaluator):**
+
+```bash
+evoskill run --rqgm
+```
+
+**Without RQGM (vanilla EvoSkill):**
+
 ```bash
 evoskill run
 ```
@@ -316,6 +495,8 @@ ls .claude/skills/             # all learned skills
 ```
 
 Copy `.claude/program.yaml` and `.claude/skills/` into your deployment to use the evolved agent configuration.
+
+---
 
 ## Harbor Integration
 
@@ -384,6 +565,7 @@ harbor_limit = 50                    # max number of tasks
 | Docker | `harbor run -e docker` | Harbor tasks dir mounted as volume |
 | Daytona | `harbor run -e daytona` | Harbor uses Daytona API to create task sandboxes. `DAYTONA_API_KEY` is forwarded automatically. |
 
+---
 
 ## CLI Reference
 
@@ -391,6 +573,7 @@ harbor_limit = 50                    # max number of tasks
 |---------|-------------|
 | `evoskill init` | Initialize a new project (creates `.evoskill/`) |
 | `evoskill run` | Run the self-improvement loop |
+| `evoskill run --rqgm` | Run with RQGM co-evolution enabled |
 | `evoskill run --docker` | Run in a Docker container |
 | `evoskill run --remote` | Run on a Daytona sandbox |
 | `evoskill eval` | Evaluate the best program on the validation set |
@@ -406,7 +589,7 @@ harbor_limit = 50                    # max number of tasks
 ### `evoskill run`
 
 ```bash
-evoskill run [--continue] [--verbose] [--quiet] [--config PATH] [--docker] [--remote] [--rebuild]
+evoskill run [--continue] [--verbose] [--quiet] [--config PATH] [--docker] [--remote] [--rebuild] [--rqgm]
 ```
 
 | Flag | Description |
@@ -418,6 +601,7 @@ evoskill run [--continue] [--verbose] [--quiet] [--config PATH] [--docker] [--re
 | `--docker` | Run inside a Docker container (builds image from `Dockerfile` if needed) |
 | `--remote` | Run on a Daytona sandbox (requires `[remote]` config) |
 | `--rebuild` | Force rebuild the Docker image before running |
+| `--rqgm` | Enable RQGM co-evolution (overrides `[rqgm] enabled = false` in config) |
 
 `evoskill eval` also accepts `--config PATH`.
 
@@ -444,6 +628,8 @@ evoskill reset             # prompts for confirmation
 ```
 
 Deletes all `program/*` branches, `frontier/*` tags, the loop checkpoint, and feedback history. Your source code, `config.toml`, `task.md`, and any skills in `.claude/skills/` are left untouched.
+
+---
 
 ## Configuration Reference
 
@@ -472,6 +658,10 @@ val_ratio = 0.12
 
 [scorer]
 type = "multi_tolerance"     # see scorer types below
+
+[rqgm]
+enabled = false              # RQGM co-evolution (disabled by default)
+epoch_size = 5
 ```
 
 Alternate configs can live next to the default config:
@@ -479,13 +669,14 @@ Alternate configs can live next to the default config:
 ```text
 .evoskill/config.toml
 .evoskill/config.openrouter.toml
+.evoskill/config.rqgm.toml
 ```
 
 Run with an explicit config:
 
 ```bash
-evoskill eval --config .evoskill/config.openrouter.toml
-evoskill run --config .evoskill/config.openrouter.toml
+evoskill eval --config .evoskill/config.rqgm.toml
+evoskill run --config .evoskill/config.rqgm.toml
 ```
 
 **Common evolution model setups:**
@@ -560,6 +751,8 @@ For Fireworks-backed scoring, set `provider = "fireworks"` and use a Fireworks m
 type = "script"
 command = "python score.py --predicted {predicted} --expected {expected}"
 ```
+
+---
 
 ## Remote Execution
 
@@ -636,6 +829,8 @@ evoskill remote download        # pull results when done
 evoskill remote stop            # cancel and clean up
 ```
 
+---
+
 ## How It Works
 
 <p align="center">
@@ -650,7 +845,13 @@ The self-improvement loop follows five stages:
 4. **Evaluator** — Scores the new program variant on a held-out validation set to measure improvement.
 5. **Frontier** — Tracks the top-N performing programs as git branches; the best survive to the next iteration.
 
-This cycle repeats for a configurable number of iterations, automatically converging on stronger agent configurations.
+**With RQGM enabled**, the evaluator itself evolves across epochs:
+- At epoch boundaries, the system computes a **hack ratio** (strict score / loose score)
+- If the agent is gaming the evaluator (high loose, low strict), tolerances are tightened
+- Gaming examples are collected into an **adversarial pool** and injected into the proposer context
+- The evaluator gets harder as the agent improves — preventing reward hacking
+
+---
 
 ## Git Branches
 
@@ -666,13 +867,18 @@ program/iter-skill-2      ← after iteration 2
 
 Frontier members are marked with `frontier/*` tags. EvoSkill only ever writes to branches prefixed `program/`, so there is no risk of it touching your working branch.
 
+---
+
 ## When the Loop Gets Stuck
 
 If accuracy stops improving, try the following:
 
 1. **Check the feedback log** — `.claude/feedback_history.md` records what the proposer tried each iteration and why it succeeded or failed.
-2. **Resume instead of restarting** — `evoskill run --continue` picks up from the last frontier rather than discarding progress.
-3. **Reset and start fresh** — `evoskill reset` clears all branches and lets you start over with a revised `task.md`.
+2. **Enable RQGM** — `evoskill run --rqgm` activates the co-evolving evaluator, which can detect and correct reward hacking patterns.
+3. **Resume instead of restarting** — `evoskill run --continue` picks up from the last frontier rather than discarding progress.
+4. **Reset and start fresh** — `evoskill reset` clears all branches and lets you start over with a revised `task.md`.
+
+---
 
 ## Python API
 
@@ -682,7 +888,9 @@ For programmatic usage, EvoSkill exposes a high-level Python API.
 
 ```python
 from src.api import EvoSkill
+from src.loop.config import RQGMConfig
 
+# Vanilla EvoSkill
 evo = EvoSkill(
     task="sealqa",
     model="sonnet",
@@ -695,6 +903,17 @@ evo = EvoSkill(
     continue_mode=False,
 )
 result = await evo.run()
+
+# With RQGM co-evolution
+rqgm_config = RQGMConfig(enabled=True, epoch_size=5)
+evo_rqgm = EvoSkill(
+    task="sealqa",
+    model="sonnet",
+    mode="skill_only",
+    max_iterations=20,
+    rqgm_config=rqgm_config,
+)
+result = await evo_rqgm.run()
 
 # Synchronous usage
 result = EvoSkill(task="base").run_sync()
@@ -712,23 +931,39 @@ summary = await EvalRunner(
 ).run()
 ```
 
+---
 
 ## Citation
 
-If you use EvoSkill in your research, please cite the [original paper](https://arxiv.org/abs/2603.02766):
+If you use EvoSkill-RQGM in your research, please cite both the RQGM paper and the original EvoSkill paper:
 
 ```bibtex
+@article{iacob2026redqueen,
+      title={The Red Queen G{\"o}del Machine: Co-Evolving Agents and Their Evaluators},
+      author={Iacob, Alex and Jovanovi{\'c}, Andrej and Shen, William F. and
+              Burkhardt, Daniel and Kurmanji, Meghdad and Tastan, Nurbek and
+              Sani, Lorenzo and Venanzi, Niccol{\`o} Alberto Elia and
+              Odonnat, Ambroise and Cao, Zeyu and Marino, Bill and
+              Qiu, Xinchi and Lane, Nicholas D.},
+      year={2026},
+      eprint={2606.26294},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG}
+}
+
 @misc{alzubi2026evoskillautomatedskilldiscovery,
-      title={EvoSkill: Automated Skill Discovery for Multi-Agent Systems}, 
-      author={Salaheddin Alzubi and Noah Provenzano and Jaydon Bingham and Weiyuan Chen and Tu Vu},
+      title={EvoSkill: Automated Skill Discovery for Multi-Agent Systems},
+      author={Alzubi, Salaheddin and Provenzano, Noah and Bingham, Jaydon and
+              Chen, Weiyuan and Vu, Tu},
       year={2026},
       eprint={2603.02766},
       archivePrefix={arXiv},
-      primaryClass={cs.AI},
-      url={https://arxiv.org/abs/2603.02766}, 
+      primaryClass={cs.AI}
 }
 ```
 
+---
+
 ## License
 
-This project is licensed under the Apache 2.0 License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache 2.0 License — see the [LICENSE](LICENSE) file for details.
