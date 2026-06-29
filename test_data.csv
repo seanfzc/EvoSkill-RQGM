@@ -1,0 +1,21 @@
+question,answer,category
+"What is 2 + 2?",4,arithmetic
+"What is 5 + 3?",8,arithmetic
+"What is 10 - 4?",6,arithmetic
+"What is 7 * 3?",21,arithmetic
+"What is 20 / 4?",5,arithmetic
+"What is 15 + 6?",21,arithmetic
+"What is 100 - 37?",63,arithmetic
+"What is 8 * 7?",56,arithmetic
+"What is 81 / 9?",9,arithmetic
+"What is 12 + 19?",31,arithmetic
+"What is 50 - 23?",27,arithmetic
+"What is 6 * 9?",54,arithmetic
+"What is 144 / 12?",12,arithmetic
+"What is 33 + 44?",77,arithmetic
+"What is 200 - 99?",101,arithmetic
+"What is 11 * 11?",121,arithmetic
+"What is 1000 / 25?",40,arithmetic
+"What is 7 + 8 + 9?",24,arithmetic
+"What is 25 * 4?",100,arithmetic
+"What is 500 - 250?",250,arithmetic

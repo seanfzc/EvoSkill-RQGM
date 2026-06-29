@@ -18,6 +18,7 @@ from src.agent_profiles import (
     prompt_generator_options,
 )
 from src.loop import SelfImprovingLoop, LoopConfig, LoopAgents, LoopResult
+from src.loop.config import RQGMConfig
 from src.registry import ProgramManager
 from src.schemas import (
     AgentResponse,
@@ -75,6 +76,7 @@ class EvoSkill:
         selection_strategy: str = "best",
         scorer: ScorerFn | None = None,
         task_config: TaskConfig | None = None,
+        rqgm_config: RQGMConfig | None = None,
     ) -> None:
         self._task_config = task_config or get_task(task)
         self._dataset_path = dataset or self._task_config.default_dataset
@@ -96,6 +98,7 @@ class EvoSkill:
         self._failure_samples = failure_samples
         self._selection_strategy = selection_strategy
         self._scorer_override = scorer
+        self._rqgm_config = rqgm_config
 
     def _build_config(self) -> LoopConfig:
         """Create a LoopConfig from constructor params."""
@@ -177,7 +180,8 @@ class EvoSkill:
 
         scorer = self._scorer_override or self._task_config.scorer
         loop = SelfImprovingLoop(
-            config, agents, manager, train_pools, val_data, scorer=scorer
+            config, agents, manager, train_pools, val_data, scorer=scorer,
+            rqgm_config=self._rqgm_config,
         )
         result = await loop.run()
 
